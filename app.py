@@ -1,59 +1,72 @@
 from flask import Flask, request, jsonify
 from yt_dlp import YoutubeDL
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
-@app.route('/api/fetch', methods=['POST'])
+@app.route("/")
+def home():
+    return "Downloader API by Vishal is running!"
+
+@app.route("/api/fetch", methods=["POST"])
 def fetch():
     data = request.get_json()
     url = data.get("url")
 
     if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
-    ydl_opts = {
-        'quiet': True,
-        'skip_download': True,
-        'format': 'bestvideo+bestaudio/best',
-        'extract_flat': False,
-    }
+        return jsonify({"error": "URL is required."}), 400
 
     try:
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            'no_warnings': True,
+            'forcejson': True,
+            'extract_flat': False,
+            'cookiefile': 'cookies.txt',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        }
+
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            title = info.get('title')
-            thumbnail = info.get('thumbnail')
+        title = info.get("title", "Unknown Title")
+        thumbnail = info.get("thumbnail")
+        formats = info.get("formats", [])
 
-            downloads = []
-            for fmt in info['formats']:
-                ext = fmt.get('ext')
-                height = fmt.get('height')
-                audio = fmt.get('acodec')
-                video = fmt.get('vcodec')
-                direct_url = fmt.get('url')
+        downloads = []
+        seen_labels = set()
 
-                if direct_url:
-                    if audio != 'none' and video == 'none':
-                        label = f"Audio - {ext.upper()}"
-                    elif height:
-                        label = f"{height}p - {ext.upper()}"
-                    else:
-                        label = ext.upper()
+        for fmt in formats:
+            file_url = fmt.get("url")
+            ext = fmt.get("ext")
+            resolution = fmt.get("format_note") or fmt.get("height")
+            audio_only = fmt.get("vcodec") == "none"
 
-                    downloads.append({
-                        'format': label,
-                        'url': direct_url
-                    })
+            if not file_url or ext not in ['mp4', 'm4a', 'mp3', 'webm']:
+                continue
 
-            return jsonify({
-                'title': title,
-                'thumbnail': thumbnail,
-                'downloads': downloads
-            })
+            if audio_only:
+                label = "MP3" if ext == "mp3" else "M4A"
+            else:
+                label = str(resolution).upper()
+
+            if label not in seen_labels:
+                seen_labels.add(label)
+                downloads.append({
+                    "label": label,
+                    "url": file_url
+                })
+
+        return jsonify({
+            "title": title,
+            "thumbnail": thumbnail,
+            "downloads": downloads
+        })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": f"Failed to extract info: {str(e)}"}), 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
